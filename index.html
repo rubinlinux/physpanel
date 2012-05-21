@@ -1,17 +1,39 @@
-#!/usr/local/bin/perl
-# :vim:expandtab ts=4 sw=4:
+<%doc>
+   Physdisplay, the new perl version of physmon
+   Author: Alex Schumann, 2012
+   University of Minnesota
+</%doc>
+<%init>
 use strict;
 use warnings;
 use CGI;
 use Data::Dumper;
-
 use Monitoring::Livestatus;
-my $q = CGI->new;
+
+# Re-map the states into a sort order we like
+our %state_sort = (
+    "0" => 0,   # ok
+    "1" => 1,   # warning
+    "2" => 2,   # critical
+    "3" => 0.5, # unknown
+    "4" => 4,
+);
+
 $Data::Dumper::Sortkeys = 1;
 
-print $q->header('text/html');
-
 my $service_table = [];
+query_live_status($service_table);
+
+my @sorted_service_table = sort servicesort @$service_table;
+
+</%init>
+
+<%perl>
+
+#my $q = CGI->new;
+
+#print $q->header('text/html');
+
 
 sub query_live_status {
     my $service_table = shift;
@@ -41,56 +63,44 @@ sub add_service_row {
 sub service_in_group {
     my $s = shift;
     my $g = shift;
-	my @groups = @{$s->{groups}};
-	foreach my $group (@groups) {
-		if($group eq $g) {
-		return 1;
-		}
-	}
+    my @groups = @{$s->{groups}};
+    foreach my $group (@groups) {
+
+        if ($group eq $g) {
+            return 1;
+        }
+    }
     return 0;
 }
 
-# Re-map the states into a sort order we like
-my %state_sort = (
-    "0" => 0,   # ok
-    "1" => 1,   # warning
-    "2" => 2,   # critical
-    "3" => 0.5, # unknown
-    "4" => 4,
-);
-
 sub servicesort {
-    #print "DEBUG: ". ($a->{state} <=> $b->{state}). "\n";
     my $res = 0;
-
+    $res = (service_in_group($b, 'critical') && $b->{state} > 0 <=> service_in_group($a, 'critical') && $a->{state} > 0) unless $res != 0;
     $res = ($state_sort{$b->{state}} <=> $state_sort{$a->{state}}) unless $res != 0;
-    #$res = service_in_group($b, 'critical') <=> service_in_group($a, 'critical') unless $res != 0;
-    #$res = $a->{description} <=> $b->{description} unless $res != 0;
-
     return $res;
 }
 
 sub get_state_human {
     my $service = shift;
     if($service->{'in_downtime'}) {
-		return "DOWNTIME";
+        return "DOWNTIME";
     }
     if($service->{'is_acknowledged'}) {
         return "ACKNOWLEDGED";
     }
     if($service->{'state'} == 0) {
-		return "OK";
+        return "OK";
     }
     if($service->{'state'} == 1) {
-		return "WARNING";
+        return "WARNING";
     }
 
     if($service->{'state'} == 2) {
-		return "CRITICAL";
+        return "CRITICAL";
     }
 
     if($service->{'state'} == 3) {
-		return "UNKNOWN";
+        return "UNKNOWN";
     }
 }
 
@@ -108,42 +118,52 @@ sub get_warning_color {
 ###
 ## BEGIN
 ###
+</%perl>
 
-query_live_status($service_table);
 
-my @sorted_service_table = sort servicesort @$service_table;
-
-my $info = "";
-    #$info .= "<div class=\"alert_box\" style=\"background:".get_warning_color($s).";\"></div>";
-    $info .= '
+<%method print_service_table>
+<%args>
+$sorted_service_table
+</%args>
         <table class="host_table">
         <tr><th>Host</th><th>Service</th><th>Details</th></tr>
-    ';
-foreach my $s (@sorted_service_table) {
-    $info .= '<tr class="host_row_'. ( (service_in_group($s, 'critical') && $s->{state} > 0)?"ISCRITICAL":get_state_human($s) ). '">';
-    $info .= '<td valign="top" nowrap>';
-    $info .=   '<span class="hostname">'. $s->{host_name}.'</span><br />';
-    $info .=   '<span class="nagios_time">TIMESTAMP</span><br />';
-    $info .= '</td>';
-    $info .= '<td valign="top">';
-    $info .= '<a class="subtle" href="https://nagios.physics.umn.edu/nagios/cgi-bin/extinfo.cgi?type=2&host='. $s->{'host_name'}.'&service='. $s->{description} . '" target="_blank">';
-    $info .= $s->{description};
-    $info .= '</a></td>';
+    <%perl>
+    foreach my $s (@$sorted_service_table) {
+        </%perl>
+        <tr class="host_row_<% ( (service_in_group($s, 'critical') && $s->{state} > 0)?"ISCRITICAL":get_state_human($s) )%>">
+          <td valign="top" nowrap>
+              <span class="hostname"><% $s->{host_name} %></span><br />
+              <span class="nagios_time">TIMESTAMP</span><br />
+          </td>
 
-    $info .='<td valign="top">';
-    $info .=$s->{plugin_output};
-    $info .='</td>';
+          <td valign="top">
+              <a class="subtle" href="https://nagios.physics.umn.edu/nagios/cgi-bin/extinfo.cgi?type=2&host='. $s->{'host_name'}.'&service='. $s->{description} . '" target="_blank">
+              <%$s->{description}%>
+              </a>
+          </td>
 
-#    $info .= "DEBUG: showing ".(service_in_group($s, 'critical')?"CRITICAL":"") ." service ". $s->{host_name}. " - ". $s->{description}."\n";
-#    $info .= "DEBUG:    State: ". get_state_human($s) . " - ". $s->{plugin_output}. "\n";
-    #print Dumper($s);
-    #$info .= "</div>\n\n";
-    $info .= "</tr>";
-}
-$info .= '</table>';
+          <td valign="top">
+                <% get_state_human($s) %>
+        <%perl>
+        if($s->{acknowledged}) {
+            </%perl><img src="ack.gif" alt="ACKNOLEDGED" /><%perl>
+        }
+            </%perl>
+            <% $s->{plugin_output}%>
+          </td>
+        </tr>
+    <%perl>
+    }
+    </%perl>
+    </table>
+</%method>
 
-my $css = "
-    <style type=\"text/css\">
+
+<%method stylesheet>
+<%args>
+$background=>559
+</%args>
+    <style type="text/css">
         body {
             background: #559;
         }
@@ -243,36 +263,27 @@ my $css = "
         }
 
      </style>
-";
+</%method>
 
-print "
+
     <html>
        <head><title>Phys Panel</title>
-	<meta http-equiv=\"refresh\" content=\"60\">
-        $css
+            <meta http-equiv="refresh" content="60">
+         <& SELF:stylesheet, background=>559 &>
        </head>
 <body>
-<table id=\"bigtable\" width=\"100%\" cellspacing=0 cellpadding=0>
+<table id="bigtable" width="100%" cellspacing=0 cellpadding=0>
 <tr>
-  <td valign=\"top\" width=\"100%\">
-    <div class=\"datetime_box\">
-      <div id=\"specials\">SPECIALS</div>
-      <div id=\"datetime\">DATE</div>
+  <td valign="top" width="100%">
+    <div class="datetime_box">
+      <div id="specials">SPECIALS</div>
+      <div id="datetime">DATE</div>
     </div>
-    <div class=\"outagelist\">$info</div>
+    <div class="outagelist"><&SELF:print_service_table, sorted_service_table=>\@sorted_service_table&></div>
   </td>
 </tr>
 </table>
 
 </body>
 </html>
-";
-
-print CGI::escapeHTML("mod_perl <rules>!\n");
-
-#print Dumper($services);
-
-# Hostname, Service description, service details
-# timestamp, 
-
 
