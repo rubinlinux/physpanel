@@ -1,0 +1,21 @@
+<%perl>
+use Data::Dumper;
+use Monitoring::Livestatus;
+
+$Data::Dumper::Sortkeys = 1;
+    my $ml = Monitoring::Livestatus->new(
+           errors_are_fatal => 0,
+                  socket => '/usr/local/var/nagios/livestatus.sock',
+                      );
+
+my $host_services = $ml->selectall_arrayref("GET services\nFilter: host_groups >= important", {Slice => {} });
+
+my $downtimes = $ml->selectall_hashref("GET downtimes", "id");
+
+
+print "<PRE>";
+print Dumper(\$host_services);
+#print Dumper(\$downtimes);
+print "</PRE>";
+
+</%perl>
