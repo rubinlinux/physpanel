@@ -10,19 +10,29 @@ use CGI;
 use Data::Dumper;
 use Monitoring::Livestatus;
 
-# Re-map the states into a sort order we like
-our %state_sort = (
-    "0" => 0,   # ok
-    "1" => 1,   # warning
-    "2" => 2,   # critical
-    "3" => 0.5, # unknown
-    "4" => 4,
-);
+#use lib "/var/cfengine/lib";
+use Time::Duration;
 
+#Rour %state_sort = (
+#R    "0" => 0,   # ok
+#R    "1" => 1,   # warning
+#R    "2" => 2,   # critical
+#R    "3" => 0.5, # unknown
+#R    "4" => 4,
+#R);
+#R
 $Data::Dumper::Sortkeys = 1;
 
-my $service_table = [];
+our $ml = Monitoring::Livestatus->new(
+   errors_are_fatal => 0,
+   socket => '/usr/local/var/nagios/livestatus.sock',
+);
+
+
+our $service_table = [];
+our $downtime_table = {};
 query_live_status($service_table);
+$downtime_table = $ml->selectall_hashref("GET downtimes", "id");
 
 my @sorted_service_table = sort servicesort @$service_table;
 
@@ -34,26 +44,59 @@ my @sorted_service_table = sort servicesort @$service_table;
 
 #print $q->header('text/html');
 
+sub state_sort {
+    my $s = shift;
+    return 0.5 if(in_downtime($s));
+    return 0.5 if($s->{acknowledged} || $s->{host_acknowledged});
+    return 0 if($s->{state} == 0);
+
+    return 9 if(service_in_group($s, 'critical'));
+
+    return 0.8 if($s->{state} == 3); #unknown
+    return $s->{state};
+}
+
+sub in_downtime {
+    my $service = shift;
+    my $hostonly = shift;
+    $hostonly = 0 unless defined $hostonly;
+
+    foreach my $down_id (@{$service->{downtimes} } ) {
+        my $downtime = $downtime_table->{$down_id};
+        if($downtime->{entry_time} < time() && $downtime->{end_time} > time()) {
+            return 1;
+        }
+    }
+    if($hostonly == 0) {
+        foreach my $down_id (@{$service->{host_downtimes}} ) {
+            my $downtime = $downtime_table->{$down_id};
+            if($downtime->{entry_time} < time() && $downtime->{end_time} > time()) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
 
 sub query_live_status {
     my $service_table = shift;
-    my $ml = Monitoring::Livestatus->new(
-       errors_are_fatal => 0,
-       socket => '/usr/local/var/nagios/livestatus.sock',
-    );
-
     my $host_services = $ml->selectall_arrayref("GET services\nFilter: host_groups >= important", {Slice => {} });
 
     foreach my $service (@$host_services) {
+        next if($service->{state} == 0 && $service->{last_hard_state_change} < time() - 60*60*24);
         add_service_row($service_table, $service)
     }
+
+    #Store downtimes by ID, we get the downtime IDs later and have to manually check if we are during downtime period...
+    #print "DEBUG:\n<PRE><BR />". Dumper($downtime_table->{1}). "<br /></PRE>\n";
 }
 
 sub add_service_row {
    my ($service_table, $service) = @_;
 
    my $row = {};
-   foreach my $field (qw/host_name description host_plugin_output plugin_output host_acknowledged acknowledged groups check_command host_check_command host_address host_groups host_state is_flapping host_is_flapping last_state_change last_time_critical last_time_ok last_time_warning last_time_unknown next_check state/) {
+   #foreach my $field (qw/host_name description host_plugin_output plugin_output host_acknowledged acknowledged groups check_command host_check_command host_address host_groups host_state is_flapping host_is_flapping last_state_change last_time_critical last_time_ok last_time_warning last_time_unknown next_check state downtimes/) {
+   foreach my $field (keys %$service) {
       $row->{$field} = $service->{$field};
    }
    return if(service_in_group($row, "notinlights"));
@@ -75,21 +118,48 @@ sub service_in_group {
 
 sub servicesort {
     my $res = 0;
-    $res = (service_in_group($b, 'critical') && $b->{state} > 0 <=> service_in_group($a, 'critical') && $a->{state} > 0) unless $res != 0;
-    $res = ($state_sort{$b->{state}} <=> $state_sort{$a->{state}}) unless $res != 0;
+    #$res = (service_in_group($b, 'critical') && $b->{state} > 0 && !in_downtime($b) <=> service_in_group($a, 'critical') && $a->{state} > 0 && !in_downtime($b)) unless $res != 0;
+    $res = state_sort($b) <=> state_sort($a) unless $res != 0;
     return $res;
+}
+
+sub get_host_state_human {
+    my $service = shift;
+    if(in_downtime($service, 1)) {
+        return "DOWNTIME";
+    }
+    if($service->{'host_acknowledged'}) {
+        return "ACKNOWLEDGED";
+    }
+    if($service->{'host_state'} == 0) {
+        return "UP";
+    }
+    if($service->{'host_state'} == 1) {
+        return "WARNING";
+    }
+
+    if($service->{'host_state'} == 2) {
+        return "DOWN";
+    }
+
+    if($service->{'host_state'} == 3) {
+        return "UNKNOWN";
+    }
 }
 
 sub get_state_human {
     my $service = shift;
-    if($service->{'in_downtime'}) {
+    if(in_downtime($service)) {
         return "DOWNTIME";
     }
-    if($service->{'is_acknowledged'}) {
+    if($service->{'acknowledged'}) {
         return "ACKNOWLEDGED";
     }
     if($service->{'state'} == 0) {
         return "OK";
+    }
+    if(service_in_group($service, 'critical')) {
+        return "EMERGENCY"; # critical service group which is in a bad state
     }
     if($service->{'state'} == 1) {
         return "WARNING";
@@ -104,15 +174,11 @@ sub get_state_human {
     }
 }
 
-sub get_warning_color {
-    my $service = shift;
-
-    return "#0F0" if($service->{state} == 0);
-    return "#FF0" if($service->{state} == 1);
-    return "#F80" if($service->{state} == 2);
-    return "#F80" if($service->{state} == 3);
-     
-    return "#FFF";
+sub friendly_time {
+    my $ts = shift;
+    #my ($sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst) = localtime($ts);
+    my @time = localtime($ts);
+    return strftime("%D %T", @time);
 }
 
 ###
@@ -129,27 +195,42 @@ $sorted_service_table
         <tr><th>Host</th><th>Service</th><th>Details</th></tr>
     <%perl>
     foreach my $s (@$sorted_service_table) {
+        next if (service_in_group($s, 'special'));
         </%perl>
-        <tr class="host_row_<% ( (service_in_group($s, 'critical') && $s->{state} > 0)?"ISCRITICAL":get_state_human($s) )%>">
+        <tr class="host_row_<% get_state_human($s)|h %>">
           <td valign="top" nowrap>
-              <span class="hostname"><% $s->{host_name} %></span><br />
-              <span class="nagios_time">TIMESTAMP</span><br />
+              <span class="hostname"><% $s->{host_name} %> (<% get_host_state_human($s)|h %>)</span>
+                <%perl>
+                if($s->{host_is_flapping}) {
+                    </%perl><img src="flapping.gif" alt="FLAPPING" /><%perl>
+                }
+                </%perl>
+              <br />
+              <span class="nagios_time"><% friendly_time($s->{last_state_change}) |h %></span>
+              <span class="nagios_time">(<% concise(ago(time() - $s->{last_state_change}, 2)) |h  %>)</span>
+              <br />
           </td>
 
           <td valign="top">
-              <a class="subtle" href="https://nagios.physics.umn.edu/nagios/cgi-bin/extinfo.cgi?type=2&host='. $s->{'host_name'}.'&service='. $s->{description} . '" target="_blank">
-              <%$s->{description}%>
+              <a class="subtle" href="https://nagios.physics.umn.edu/nagios/cgi-bin/extinfo.cgi?type=2&host=<% $s->{host_name}|u%>&service=<%$s->{description}%>" target="_blank">
+              <%$s->{description} |h%>
               </a>
           </td>
 
           <td valign="top">
-                <% get_state_human($s) %>
         <%perl>
+        if(in_downtime($s) ) {
+            </%perl><img src="downtime.gif" alt="DOWNTIME" /><%perl>
+        }
         if($s->{acknowledged}) {
             </%perl><img src="ack.gif" alt="ACKNOLEDGED" /><%perl>
         }
+        if($s->{is_flapping}) {
+            </%perl><img src="flapping.gif" alt="FLAPPING" /><%perl>
+        }
             </%perl>
-            <% $s->{plugin_output}%>
+            <% get_state_human($s) |h %> -
+            <% $s->{plugin_output} |h%>
           </td>
         </tr>
     <%perl>
@@ -196,7 +277,7 @@ $background=>559
             background: #0F0; color: black;
         }
         .host_row_WARNING { /* warning */
-            background: #dcdc00; color: black;
+            background: #cccb00; color: black;
         }
         .host_row_OUTAGE { /* outage */
             background: #F80; color: black;
@@ -205,9 +286,9 @@ $background=>559
             background: #F88; color: black;
         }
         .host_row_CRITICAL { /* critical service state (not a critical service) */
-            background: #f80; color: black;
+            background: #f90; color: black;
         }
-        .host_row_ISCRITICAL { /* critical service state on a service in the critical group */
+        .host_row_EMERGENCY { /* critical service state on a service in the critical group */
             background: #f00; color: black;
         }
         .host_row_ACKNOWLEDGED { /* critical service */
@@ -277,7 +358,7 @@ $background=>559
   <td valign="top" width="100%">
     <div class="datetime_box">
       <div id="specials">SPECIALS</div>
-      <div id="datetime">DATE</div>
+      <div id="datetime"><% friendly_time(time())|h%></div>
     </div>
     <div class="outagelist"><&SELF:print_service_table, sorted_service_table=>\@sorted_service_table&></div>
   </td>
