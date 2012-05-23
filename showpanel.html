@@ -227,7 +227,7 @@ $sorted_service_table
     <%perl>
     my $something_is_emergency = 0;
     foreach my $s (@$sorted_service_table) {
-        #next if (service_in_group($s, 'special'));
+        next if (service_in_group($s, 'special'));
         if(get_state_human($s) eq 'EMERGENCY') {
           $something_is_emergency++;
         }
@@ -286,7 +286,7 @@ $background=>559
 </%args>
     <style type="text/css">
         body {
-            background: #559;
+            background: #226;
         }
         table.host_table {
             border: 1px solid black;
