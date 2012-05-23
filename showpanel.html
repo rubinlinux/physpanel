@@ -1,0 +1,404 @@
+<%doc>
+   Physdisplay, the new perl version of physmon
+   Author: Alex Schumann, 2012
+   University of Minnesota
+</%doc>
+<%init>
+use strict;
+use warnings;
+use CGI;
+use Data::Dumper;
+use Monitoring::Livestatus;
+
+#use lib "/var/cfengine/lib";
+use Time::Duration;
+
+#Rour %state_sort = (
+#R    "0" => 0,   # ok
+#R    "1" => 1,   # warning
+#R    "2" => 2,   # critical
+#R    "3" => 0.5, # unknown
+#R    "4" => 4,
+#R);
+#R
+$Data::Dumper::Sortkeys = 1;
+
+our $ml = Monitoring::Livestatus->new(
+   errors_are_fatal => 0,
+   socket => '/usr/local/var/nagios/livestatus.sock',
+);
+
+
+our $service_table = [];
+our $downtime_table = {};
+query_live_status($service_table);
+$downtime_table = $ml->selectall_hashref("GET downtimes", "id");
+
+my @sorted_service_table = sort servicesort @$service_table;
+
+sub state_sort {
+    my $s = shift;
+    return 0.5 if(in_downtime($s));
+    return 0.5 if($s->{acknowledged} || $s->{host_acknowledged});
+    return 0 if($s->{state} == 0);
+
+    return 9 if(service_in_group($s, 'critical'));
+
+    return 0.8 if($s->{state} == 3); #unknown
+    return $s->{state};
+}
+
+sub in_downtime {
+    my $service = shift;
+    my $hostonly = shift;
+    $hostonly = 0 unless defined $hostonly;
+
+    foreach my $down_id (@{$service->{downtimes} } ) {
+        my $downtime = $downtime_table->{$down_id};
+        if($downtime->{entry_time} < time() && $downtime->{end_time} > time()) {
+            return 1;
+        }
+    }
+    if($hostonly == 0) {
+        foreach my $down_id (@{$service->{host_downtimes}} ) {
+            my $downtime = $downtime_table->{$down_id};
+            if($downtime->{entry_time} < time() && $downtime->{end_time} > time()) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+sub query_live_status {
+    my $service_table = shift;
+    my $host_services = $ml->selectall_arrayref("GET services\nFilter: host_groups >= important", {Slice => {} });
+
+    foreach my $service (@$host_services) {
+        next if($service->{state} == 0 && $service->{last_hard_state_change} < time() - 60*60*24);
+        add_service_row($service_table, $service)
+    }
+
+    #Store downtimes by ID, we get the downtime IDs later and have to manually check if we are during downtime period...
+    #print "DEBUG:\n<PRE><BR />". Dumper($downtime_table->{1}). "<br /></PRE>\n";
+}
+
+sub add_service_row {
+   my ($service_table, $service) = @_;
+
+   my $row = {};
+   #foreach my $field (qw/host_name description host_plugin_output plugin_output host_acknowledged acknowledged groups check_command host_check_command host_address host_groups host_state is_flapping host_is_flapping last_state_change last_time_critical last_time_ok last_time_warning last_time_unknown next_check state downtimes/) {
+   foreach my $field (keys %$service) {
+      $row->{$field} = $service->{$field};
+   }
+   return if(service_in_group($row, "notinlights"));
+   push @$service_table, $row;
+}
+
+sub service_in_group {
+    my $s = shift;
+    my $g = shift;
+    my @groups = @{$s->{groups}};
+    foreach my $group (@groups) {
+
+        if ($group eq $g) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+sub servicesort {
+    my $res = 0;
+    #$res = (service_in_group($b, 'critical') && $b->{state} > 0 && !in_downtime($b) <=> service_in_group($a, 'critical') && $a->{state} > 0 && !in_downtime($b)) unless $res != 0;
+    $res = state_sort($b) <=> state_sort($a) unless $res != 0;
+    $res = $b->{last_state_change} <=> $a->{last_state_change} unless $res != 0;
+    return $res;
+}
+
+sub get_host_state_human {
+    my $service = shift;
+    if(in_downtime($service, 1)) {
+        return "DOWNTIME";
+    }
+    if($service->{'host_acknowledged'}) {
+        return "ACKNOWLEDGED";
+    }
+    if($service->{'host_state'} == 0) {
+        return "UP";
+    }
+    if($service->{'host_state'} == 1) {
+        return "WARNING";
+    }
+
+    if($service->{'host_state'} == 2) {
+        return "DOWN";
+    }
+
+    if($service->{'host_state'} == 3) {
+        return "UNKNOWN";
+    }
+}
+
+sub get_state_human {
+    my $service = shift;
+    if(in_downtime($service)) {
+        return "DOWNTIME";
+    }
+    if($service->{'acknowledged'}) {
+        return "ACKNOWLEDGED";
+    }
+    if($service->{'state'} == 0) {
+        return "OK";
+    }
+    if(service_in_group($service, 'critical')) {
+        return "EMERGENCY"; # critical service group which is in a bad state
+    }
+    if($service->{'state'} == 1) {
+        return "WARNING";
+    }
+
+    if($service->{'state'} == 2) {
+        return "CRITICAL";
+    }
+
+    if($service->{'state'} == 3) {
+        return "UNKNOWN";
+    }
+}
+
+sub friendly_time {
+    my $ts = shift;
+    #my ($sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst) = localtime($ts);
+    my @time = localtime($ts);
+    return strftime("%D %T", @time);
+}
+
+###
+## BEGIN
+###
+</%init>
+<%method print_specials>
+<%args>
+$sorted_service_table
+</%args>
+<%perl>
+    my $count = 0;
+    foreach my $s (@$sorted_service_table) {
+        if(service_in_group($s, 'special')) {
+            if($s->{description} eq 'cfengine runlog check') {
+                if($s->{plugin_output} =~ /failed on\: (.*)/) {
+                    my @hosts = split /,/, $1;
+                    </%perl><span style="color: #FEA;"><% $count++ > 0?"|":""%> <% scalar @hosts|h%> hosts not seen recently</span> <%perl>
+                }
+            }
+            elsif($s->{description} eq 'check doorlocks') {
+                if($s->{plugin_output} =~ /Doorlocks? for (.*) needs? programming/) {
+                    my @doors = split / /,$1;
+                    #$doors =~ s/ /nbsp;/g;
+                    </%perl><span style="color: #DFA;"><% $count++ > 0?"|":""%> Need to program <% scalar @doors %> door(s) </span><%perl>
+                }
+            }
+            elsif($s->{description} eq 'linux yum updates') {
+                if($s->{plugin_output} =~ /Yum updates failed on (.*) hosts/) {
+                    </%perl><span style="color: #FdF;"><% $count++ > 0?"|":""%> Yum Failures: <% $1 %> </span><%perl>
+                    
+                }
+            }
+            elsif($s->{description} eq 'check cfengine staging') {
+                if($s->{plugin_output} =~ /Hosts? (.+) (are|is) in staging/) {
+                    </%perl><span style="color: #DDF;"><% $count++ > 0?"|":""%> cfengine staging: <% $1 %> </span><%perl>
+                }
+            }
+            else {
+                print " | UNHANDLED SPECIAL: ". Dumper($s). "\n<br />";
+            }
+        }
+    }
+</%perl>
+</%method>
+
+<%method print_service_table>
+<%args>
+$sorted_service_table
+</%args>
+        <table class="host_table">
+        <tr><th>Host</th><th>Service</th><th>Details</th></tr>
+    <%perl>
+    foreach my $s (@$sorted_service_table) {
+        #next if (service_in_group($s, 'special'));
+        </%perl>
+        <tr class="host_row_<% get_state_human($s)|h %>">
+          <td valign="top" nowrap>
+              <span class="hostname"><% $s->{host_name} %> (<% get_host_state_human($s)|h %>)</span>
+                <%perl>
+                if($s->{host_is_flapping}) {
+                    </%perl><img src="flapping.gif" alt="FLAPPING" /><%perl>
+                }
+                </%perl>
+              <br />
+              <span class="nagios_time"><% friendly_time($s->{last_state_change}) |h %></span>
+              <span class="nagios_time">(<% concise(ago(time() - $s->{last_state_change}, 2)) |h  %>)</span>
+              <br />
+          </td>
+
+          <td valign="top">
+              <a class="subtle" href="https://nagios.physics.umn.edu/nagios/cgi-bin/extinfo.cgi?type=2&host=<% $s->{host_name}|u%>&service=<%$s->{description}%>" target="_blank">
+              <%$s->{description} |h%>
+              </a>
+          </td>
+
+          <td valign="top">
+        <%perl>
+        if(in_downtime($s) ) {
+            </%perl><img src="downtime.gif" alt="DOWNTIME" /><%perl>
+        }
+        if($s->{acknowledged}) {
+            </%perl><img src="ack.gif" alt="ACKNOLEDGED" /><%perl>
+        }
+        if($s->{is_flapping}) {
+            </%perl><img src="flapping.gif" alt="FLAPPING" /><%perl>
+        }
+            </%perl>
+            <% get_state_human($s) |h %> -
+            <% $s->{plugin_output} |h%>
+          </td>
+        </tr>
+    <%perl>
+    }
+    </%perl>
+    </table>
+</%method>
+
+
+<%method stylesheet>
+<%args>
+$background=>559
+</%args>
+    <style type="text/css">
+        body {
+            background: #559;
+        }
+        table.host_table {
+            border: 1px solid black;
+            width: 100%;
+            padding: 0px; margin: 0px;
+            background: white;
+        }
+        table.host_table th {
+            background: black; color: white; font-weight: bold;
+        }
+        table.host_table td {
+            padding: 0px; margin: 0px;
+            padding-left: 4px;
+            padding-right: 4px;
+            font-size: 1.4em;
+        }
+        table.host_table tr {
+            border: 1px solid black;
+        }
+        .host_row_DOWN {
+                background: #F80;
+                color: black;
+        }
+        .host_row_UP {
+            background: #0F0; color: black;
+        }
+        .host_row_OK { /* OK */
+            background: #0F0; color: black;
+        }
+        .host_row_WARNING { /* warning */
+            background: #cfc900; color: black;
+        }
+        .host_row_OUTAGE { /* outage */
+            background: #F80; color: black;
+        }
+        .host_row_UNKNOWN { /* unknown service */
+            background: #F88; color: black;
+        }
+        .host_row_CRITICAL { /* critical service state (not a critical service) */
+            background: #f95; color: black;
+        }
+        .host_row_EMERGENCY { /* critical service state on a service in the critical group */
+            background: #f00; color: black;
+        }
+        .host_row_ACKNOWLEDGED { /* critical service */
+            background: #C99; color: black;
+        }
+        .host_row_DOWNTIME { /* critical service */
+            background: #696; color: black;
+        }
+        .hostname {
+                font-family: sans-serif;
+                font-weight: bold;
+        }
+        div.alert_box {
+            font-size: 2.8em; font-weight: bold; color: black;
+            border: 1px solid black;
+            padding: 10px; margin: 5px;
+            background: #559;
+            margin-left: 0;
+            margin-right: 0;
+        }
+        div.datetime_box {
+            color: yellow;
+            font-size: 1.8em; font-weight: bold;
+            border: 1px solid black;
+            background: #226;
+        }
+        #datetime {
+           padding: 10px 20px; margin: 5px;
+           font-size: 1.8em; font-weight: bold;
+           margin-left: 0; margin-right: 0;
+           white-space: nowrap;
+           color: white;
+        }
+        a:link.subtle, a:visited.subtle {
+            color: black;
+            text-decoration: none;
+        }
+        a:hover.subtle {
+            text-decoration: underline;
+        }
+        span.nagios_time {
+            font-size: 0.6em;
+        }
+        #specials {
+                font-size: 18px;
+                font-weight: bold;
+                padding: 5px;
+        }
+        #outhosts {
+            font-weight: normal;
+            font-family: sans-serif;
+        }
+
+     </style>
+</%method>
+
+
+    <html>
+       <head><title>Phys Panel</title>
+         <& SELF:stylesheet, background=>559 &>
+       </head>
+<body>
+<table id="bigtable" width="100%" cellspacing=0 cellpadding=0>
+<tr>
+  <td valign="top" width="100%">
+    <div class="datetime_box">
+      <table width="100%" cellspacing=0 cellpadding=0>
+      <tr style="color: white;">
+         <td><div id="datetime"><% friendly_time(time())|h%></div> </td>
+         <td><div id="specials"><&SELF:print_specials, sorted_service_table=>\@sorted_service_table&></div></td>
+      </tr>
+      </table>
+    </div>
+    <div class="outagelist"><&SELF:print_service_table, sorted_service_table=>\@sorted_service_table&></div>
+    <audio src="sounds/red-alert.ogg" preload="auto" autobuffer autoplay></audio>
+  </td>
+</tr>
+</table>
+
+</body>
+</html>
+

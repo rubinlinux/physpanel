@@ -1,0 +1,23 @@
+K 25
+svn:wc:ra_dav:version-url
+V 70
+/svn/physweb/!svn/ver/368/trunk/monitor/data/physmon-oldnotused/sounds
+END
+alert1.wav
+K 25
+svn:wc:ra_dav:version-url
+V 81
+/svn/physweb/!svn/ver/368/trunk/monitor/data/physmon-oldnotused/sounds/alert1.wav
+END
+r2d2wst1.mp3
+K 25
+svn:wc:ra_dav:version-url
+V 83
+/svn/physweb/!svn/ver/368/trunk/monitor/data/physmon-oldnotused/sounds/r2d2wst1.mp3
+END
+red-alert-physmon.wav
+K 25
+svn:wc:ra_dav:version-url
+V 92
+/svn/physweb/!svn/ver/368/trunk/monitor/data/physmon-oldnotused/sounds/red-alert-physmon.wav
+END
