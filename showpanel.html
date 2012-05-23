@@ -225,8 +225,12 @@ $sorted_service_table
         <table class="host_table">
         <tr><th>Host</th><th>Service</th><th>Details</th></tr>
     <%perl>
+    my $something_is_emergency = 0;
     foreach my $s (@$sorted_service_table) {
         #next if (service_in_group($s, 'special'));
+        if(get_state_human($s) eq 'EMERGENCY') {
+          $something_is_emergency++;
+        }
         </%perl>
         <tr class="host_row_<% get_state_human($s)|h %>">
           <td valign="top" nowrap>
@@ -268,6 +272,11 @@ $sorted_service_table
     }
     </%perl>
     </table>
+    <%perl>
+    if($something_is_emergency) {
+        </%perl><audio src="sounds/red-alert.ogg" preload="auto" autobuffer autoplay></audio><%perl>
+    }
+    </%perl>
 </%method>
 
 
@@ -394,7 +403,6 @@ $background=>559
       </table>
     </div>
     <div class="outagelist"><&SELF:print_service_table, sorted_service_table=>\@sorted_service_table&></div>
-    <audio src="sounds/red-alert.ogg" preload="auto" autobuffer autoplay></audio>
   </td>
 </tr>
 </table>
