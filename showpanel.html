@@ -228,10 +228,11 @@ $sorted_service_table
     my $something_is_emergency = 0;
     foreach my $s (@$sorted_service_table) {
         next if (service_in_group($s, 'special'));
-        if(get_state_human($s) eq 'EMERGENCY') {
+        if(get_state_human($s) eq 'EMERGENCY' && $s->{current_attempt} >= 3 ) {
           $something_is_emergency++;
         }
         </%perl>
+%#          <PRE style="color: white;"><% Dumper($s) %></PRE>
         <tr class="host_row_<% get_state_human($s)|h %>">
           <td valign="top" nowrap>
               <span class="hostname"><% $s->{host_name} %> (<% get_host_state_human($s)|h %>)</span>
