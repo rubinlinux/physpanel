@@ -247,13 +247,13 @@ $sorted_service_table
               <br />
           </td>
 
-          <td valign="top">
+          <td valign="top" style="max-width: 300px;">
               <a class="subtle" href="https://nagios.physics.umn.edu/nagios/cgi-bin/extinfo.cgi?type=2&host=<% $s->{host_name}|u%>&service=<%$s->{description}%>" target="_blank">
               <%$s->{description} |h%>
               </a>
           </td>
 
-          <td valign="top">
+          <td valign="top" style="max-width: 500px;">
         <%perl>
         if(in_downtime($s) ) {
             </%perl><img src="downtime.gif" alt="DOWNTIME" /><%perl>
@@ -303,6 +303,7 @@ $background=>559
             padding-left: 4px;
             padding-right: 4px;
             font-size: 1.4em;
+            word-wrap: break-word;
         }
         table.host_table tr {
             border: 1px solid black;
