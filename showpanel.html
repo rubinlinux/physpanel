@@ -187,9 +187,9 @@ $sorted_service_table
     foreach my $s (@$sorted_service_table) {
         if(service_in_group($s, 'special')) {
             if($s->{description} eq 'cfengine runlog check') {
-                if($s->{plugin_output} =~ /failed on\: (.*)/) {
+                if($s->{plugin_output} =~ /running on\: (.*)/) {
                     my @hosts = split /,/, $1;
-                    </%perl><span style="color: #FEA;"><% $count++ > 0?"|":""%> <% scalar @hosts|h%> hosts not seen recently</span> <%perl>
+                    </%perl><span style="color: #FEA;"><% $count++ > 0?"|":""%> <% scalar @hosts|h%> hosts not running cfengine</span> <%perl>
                 }
             }
             elsif($s->{description} eq 'check doorlocks') {
