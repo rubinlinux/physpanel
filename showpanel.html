@@ -75,7 +75,7 @@ sub query_live_status {
     my $host_services = $ml->selectall_arrayref("GET services\nFilter: host_groups >= important", {Slice => {} });
 
     foreach my $service (@$host_services) {
-        next if($service->{state} == 0 && $service->{last_hard_state_change} < time() - 60*60*24);
+        next if($service->{state} == 0 && $service->{last_hard_state_change} < time() - 60*60*24*4);
         add_service_row($service_table, $service)
     }
 

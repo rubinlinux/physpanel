@@ -76,7 +76,7 @@ sub handler
     srand(time + $randseed + $$);
 
     # Only handle certain types of request (text, html etc); also handle downloads directory (for dhandler)
-    return -1 if ($r->uri =~ /^\/images/) || ($r->content_type && $r->content_type !~ m|^text/|i && $r->uri !~ /download/i) 
+    return -1 if ($r->uri =~ /^\/images/) || ($r->content_type && $r->content_type !~ m|^text/|i && $r->uri == '/') 
                  || ($r->filename && ($r->filename =~ m/\.(css|txt|js)$/i ));
 
     # Determine instance-specific comproot and mason-data locations
