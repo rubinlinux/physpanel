@@ -226,10 +226,14 @@ $sorted_service_table
         <tr><th>Host</th><th>Service</th><th>Details</th></tr>
     <%perl>
     my $something_is_emergency = 0;
+    my $something_is_critical = 0;
     foreach my $s (@$sorted_service_table) {
         next if (service_in_group($s, 'special'));
         if(get_state_human($s) eq 'EMERGENCY' && $s->{current_attempt} >= 3 ) {
           $something_is_emergency++;
+        }
+        if(get_state_human($s) eq 'CRITICAL' && $s->{current_attempt} >= 3 ) {
+            $something_is_critical++;
         }
         </%perl>
 %#          <PRE style="color: white;"><% Dumper($s) %></PRE>
@@ -276,6 +280,9 @@ $sorted_service_table
     <%perl>
     if($something_is_emergency) {
         </%perl><audio src="sounds/red-alert.ogg" preload="auto" autobuffer autoplay></audio><%perl>
+    }
+    elsif($something_is_critical) {
+        </%perl><audio src="sounds/r2d2wst1.ogg" preload="auto" autobuffer autoplay></audio><%perl>
     }
     </%perl>
 </%method>
