@@ -61,7 +61,7 @@ my $site = 'physpanel';
 
 # So, this top bit of code is executed once for each new thread of apache that is spawned. It has general setup.
 
-$comproot = '/export/data/nagios/physpanel/';
+$comproot = '/usr/local/www/physpanel/';
 warn("This is the perl post config handler thingy");
 
 # This handler is called back for each request.
@@ -81,7 +81,7 @@ sub handler
 
     # Determine instance-specific comproot and mason-data locations
     my $this_comproot = $comproot;
-    my $data_dir = "/export/data/nagios/mason-data";
+    my $data_dir = "/tmp/mason-data";
     my %debug = (
             named_component_subs => 1,
             static_source => 0,

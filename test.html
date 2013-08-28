@@ -5,10 +5,11 @@ use Monitoring::Livestatus;
 $Data::Dumper::Sortkeys = 1;
     my $ml = Monitoring::Livestatus->new(
            errors_are_fatal => 0,
-                  socket => '/usr/local/var/nagios/livestatus.sock',
+                  socket => '/var/lib/nagios/rw/live',
                       );
 
-my $host_services = $ml->selectall_arrayref("GET services\nFilter: host_groups >= important", {Slice => {} });
+#my $host_services = $ml->selectall_arrayref("GET services\nFilter: host_groups >= important", {Slice => {} });
+my $host_services = $ml->selectall_arrayref("GET services\n", {Slice => {} });
 
 my $downtimes = $ml->selectall_hashref("GET downtimes", "id");
 

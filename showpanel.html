@@ -25,7 +25,8 @@ $Data::Dumper::Sortkeys = 1;
 
 our $ml = Monitoring::Livestatus->new(
    errors_are_fatal => 0,
-   socket => '/usr/local/var/nagios/livestatus.sock',
+#   socket => '/usr/local/var/nagios/livestatus.sock',
+   socket => '/var/lib/nagios/rw/live',
 );
 
 
@@ -72,7 +73,8 @@ sub in_downtime {
 
 sub query_live_status {
     my $service_table = shift;
-    my $host_services = $ml->selectall_arrayref("GET services\nFilter: host_groups >= important", {Slice => {} });
+    #my $host_services = $ml->selectall_arrayref("GET services\nFilter: host_groups >= important", {Slice => {} });
+    my $host_services = $ml->selectall_arrayref("GET services\n", {Slice => {} });
 
     foreach my $service (@$host_services) {
         next if($service->{state} == 0 && $service->{last_hard_state_change} < time() - 60*60*24*4);
@@ -189,8 +191,8 @@ $sorted_service_table
             if($s->{description} eq 'cfengine runlog check') {
                 if($s->{plugin_output} =~ /running on\: (.*)/) {
                     my @hosts = split /,/, $1;
-		    my $hosts = join(', ', @hosts[0 .. 4]);
-		    $hosts .= "..." if(@hosts > 5);
+                    my $hosts = join(', ', @hosts[0 .. 4]);
+                    $hosts .= "..." if(@hosts > 5);
                     </%perl><span style="color: #FEA;"><% $count++ > 0?"|":""%> <% scalar @hosts|h%> hosts not running cfengine: <% $hosts|h %></span> <%perl>
                 }
             }
